@@ -46,11 +46,9 @@ classdef MGF3_Integrated < handle
                 obj.dcim = DCIM_Integrated();
                 
                 % 初始化DCIM引擎
+                % 注意：与strata C++一致，DCIM内部的SpectralMGF使用
+                % extract_quasistatic=false。DCIM直接拟合完整的谱域MGF。
                 obj.dcim.Initialize(lm, f, s.components);
-                
-                % 设置DCIM参数（直接修改properties）
-                obj.dcim.extract_quasistatic = ...
-                    isfield(s, 'extract_quasistatic') && s.extract_quasistatic;
                 obj.dcim.N1 = 100;  % strata默认
                 obj.dcim.N2 = 100;
                 obj.dcim.max_num_images = -1;  % 无限制
