@@ -31,7 +31,7 @@ epsr_list = [lm.layers.epsr];
 epsr_max = max(epsr_list);
 T02 = 5.0 * sqrt(epsr_max);
 T01 = 200.0;
-N1 = 100; N2 = 100;
+N1 = 100; N2 = 400;
 
 smgf = SpectralMGF();
 smgf.Initialize(lm, freq, [1,1,1,1,1], false, false);
@@ -84,7 +84,7 @@ end
 fprintf('L2 before GPOF: max|K2|=%.4e, max|K2_mod|=%.4e\n', max(abs(K2)), max(abs(K2_mod)));
 
 % GPOF L2
-[alpha_t2, a2, res2] = GPOF(K2_mod(:), t2(:), 50, 1e-4, 1e-16);
+[alpha_t2, a2, res2] = GPOF(K2_mod(:), t2(:), 200, 1e-4, 1e-16);
 fprintf('L2: %d exp, res=%.4e\n', length(alpha_t2), res2);
 alpha2_kz = alpha_t2 .* T02 ./ ((1 + 1j*T02) * k);
 a2_kz = a2 .* exp(k * alpha2_kz);
