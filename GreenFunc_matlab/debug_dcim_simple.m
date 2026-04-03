@@ -1,4 +1,5 @@
 %% 简化诊断 - 对比 DCIM 和 INTEGRATE 在相同 rho 下的表现
+clear classes;  %#ok<CLCLS>  % 必须清除类缓存以加载最新代码
 clear; clc;
 addpath(pwd);
 

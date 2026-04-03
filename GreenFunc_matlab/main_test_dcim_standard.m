@@ -1,4 +1,5 @@
 %% 测试DCIM方法（标准配置）
+clear classes;  %#ok<CLCLS>  % 必须清除类缓存以加载最新代码
 clear; clc;
 addpath(pwd);
 
