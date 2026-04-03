@@ -53,12 +53,18 @@ classdef LayerManager < handle
             end
             
             % Stats - 只考虑层，不包含半空间（与strata C++一致）
+            % 注意：k_min/k_max 存储的是复波数值（不是绝对值）
+            % C++: if (abs(k[ii]) < abs(k_min)) k_min = k[ii];
             if ~isempty(obj.layers)
-                k_vals = abs([obj.layers.k]);
+                k_abs = abs([obj.layers.k]);
+                [~, idx_min] = min(k_abs);
+                [~, idx_max] = max(k_abs);
+                obj.k_min = obj.layers(idx_min).k;
+                obj.k_max = obj.layers(idx_max).k;
             else
-                k_vals = [abs(obj.k_top), abs(obj.k_bot)];
+                obj.k_min = obj.k_top;
+                obj.k_max = obj.k_top;
             end
-            obj.k_max = max(k_vals); obj.k_min = min(k_vals);
             
             % 保存所有层的介电常数（用于DCIM）
             obj.eps = [obj.eps_top];
