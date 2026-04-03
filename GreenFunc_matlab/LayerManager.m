@@ -52,9 +52,12 @@ classdef LayerManager < handle
                 obj.layers(i) = L;
             end
             
-            % Stats
-            k_vals = [abs(obj.k_top), abs(obj.k_bot)];
-            if ~isempty(obj.layers), k_vals = [k_vals, abs([obj.layers.k])]; end
+            % Stats - 只考虑层，不包含半空间（与strata C++一致）
+            if ~isempty(obj.layers)
+                k_vals = abs([obj.layers.k]);
+            else
+                k_vals = [abs(obj.k_top), abs(obj.k_bot)];
+            end
             obj.k_max = max(k_vals); obj.k_min = min(k_vals);
             
             % 保存所有层的介电常数（用于DCIM）

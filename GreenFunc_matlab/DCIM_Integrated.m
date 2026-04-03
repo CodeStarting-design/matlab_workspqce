@@ -343,7 +343,7 @@ classdef DCIM_Integrated < handle
         end
         
         function [alpha, a] = GPOF_Fit_Stable(obj, t, f, L, max_images)
-            % 使用现有的GPOF函数
+            % 使用现有的GPOF函数（与strata C++一致，不做额外过滤）
             % 返回：
             %   alpha - 指数（特征值）
             %   a - 系数
@@ -356,22 +356,18 @@ classdef DCIM_Integrated < handle
                 % 调用现有GPOF函数
                 % GPOF返回: [exponents, coefficients, residual]
                 % 其中 y(t) = sum a_i * exp(alpha_i * t)
-                [alpha, a, ~] = GPOF(f(:), t(:), L, obj.tol_svd, obj.tol_eig);
-
-                % 过滤不稳定的特征值
-                if ~isempty(alpha)
-                    % strata的过滤条件更宽松
-                    idx_stable = abs(alpha) < 10 & real(alpha) > -5;
-                    alpha = alpha(idx_stable);
-                    a = a(idx_stable);
-
-                    % 限制最大数量（仅当max_images > 0时）
-                    if max_images > 0 && length(alpha) > max_images
-                        [~, idx_sort] = sort(abs(a), 'descend');
-                        alpha = alpha(idx_sort(1:max_images));
-                        a = a(idx_sort(1:max_images));
-                    end
+                
+                % 与strata一致：当max_images > 0时，用max_images作为L参数
+                L_use = L;
+                if max_images > 0
+                    L_use = max_images;
                 end
+                
+                [alpha, a, ~] = GPOF(f(:), t(:), L_use, obj.tol_svd, obj.tol_eig);
+
+                % 注意：strata C++ 中 RunGPOF 没有对 alpha 做任何过滤
+                % 只有 SVD 截断和特征值截断（在 GPOF 函数内部完成）
+                % 所以这里不做额外过滤
 
             catch ME
                 warning(ME.identifier, 'GPOF拟合失败: %s', ME.message);
