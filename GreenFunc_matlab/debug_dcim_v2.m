@@ -1,4 +1,4 @@
-%% 测试镜像过滤策略
+%% 对比不同 GPOF 实现策略
 clear classes; %#ok<CLCLS>
 clear; clc;
 addpath(pwd);
@@ -28,18 +28,11 @@ smgf.Initialize(lm, freq, [1,1,1,1,1], false, false);
 smgf.SetLayers(i_src, m_obs);
 smgf.SetSourcePoint(z_src); smgf.SetObservationPoint(z_obs);
 
-t1 = linspace(0, T01, N1);
-kz1 = -1j*k*(T02+t1);
-krho1 = sqrt(k^2-kz1.^2); krho1 = abs(real(krho1))+1j*abs(imag(krho1));
 t2 = linspace(1e-2, T02, N2);
 kz2 = k*(-1j*t2+(1-t2/T02));
 krho2 = sqrt(k^2-kz2.^2); krho2 = abs(real(krho2))+1j*abs(imag(krho2));
 
-K1 = zeros(1,N1);
-for ii=1:N1
-    smgf.SetRadialWaveNumber(krho1(ii)); smgf.ComputeSpectralMGF();
-    K1(ii) = smgf.K(comp)*kz1(ii);
-end
+% 采样路径2（直接做单层 DCIM 简化）
 K2 = zeros(1,N2);
 for ii=1:N2
     smgf.SetRadialWaveNumber(krho2(ii)); smgf.ComputeSpectralMGF();
@@ -59,69 +52,107 @@ qmgf.Initialize(lm, freq, [1,1,1,1,1], false);
 qmgf.SetLayers(i_src, m_obs);
 K_q = qmgf.ComputeQMGF_Spatial(z_obs, z_src, rho_test);
 G_ref = G_int + K_q(comp);
-fprintf('G_ref = abs %.4f\n\n', abs(G_ref));
+fprintf('G_ref = %.4e %+.4ei (abs=%.4f)\n\n', real(G_ref), imag(G_ref), abs(G_ref));
 
-% 用 tol_svd=1e-4（最优的）
-tol_svd = 1e-4;
-[at1, a1, ~] = GPOF(K1(:), t1(:), 50, tol_svd, 1e-16);
-a1k = a1.*exp(-T02*at1); al1k = at1./(1j*k);
+%% 方法A: 当前 GPOF (full SVD + full Z)
+fprintf('=== 方法A: 当前 GPOF ===\n');
+[at_A, a_A, res_A] = GPOF(K2(:), t2(:), 50, 1e-4, 1e-16);
+fprintf('%d exp, res=%.4e\n', length(at_A), res_A);
 
-K2m = K2;
-for ii=1:N2
-    for jj=1:length(a1k)
-        K2m(ii) = K2m(ii)-a1k(jj)*exp(-al1k(jj)*kz2(ii));
+al_kz_A = at_A.*T02./((1+1j*T02)*k);
+a_kz_A = a_A.*exp(k*al_kz_A);
+G_A = compute_G(a_kz_A, al_kz_A, k, rho_test);
+fprintf('G = %.4e %+.4ei (abs=%.4f, err=%.2f%%)\n', real(G_A), imag(G_A), abs(G_A), abs(G_A-G_ref)/abs(G_ref)*100);
+
+%% 方法B: pinv 代替 SVD 截断
+fprintf('\n=== 方法B: pinv-based GPOF ===\n');
+y = K2(:); t = t2(:); N = length(y); L = 50;
+dt = t(2)-t(1);
+m_rows = N-L; n_cols = L;
+
+Y1 = zeros(m_rows, n_cols);
+Y2_mat = zeros(m_rows, n_cols);
+for ii=1:n_cols
+    for jj=1:m_rows
+        Y1(jj,ii) = y(jj+ii-1);
+        Y2_mat(jj,ii) = y(jj+ii);
     end
 end
 
-[at2, a2, res2] = GPOF(K2m(:), t2(:), 50, tol_svd, 1e-16);
-al2k = at2.*T02./((1+1j*T02)*k);
-a2k = a2.*exp(k*al2k);
+% 用 pinv 方法
+Z_pinv = pinv(Y1) * Y2_mat;
+w_B = eig(Z_pinv);
+[~,idx] = sort(abs(w_B),'descend');
+w_B = w_B(idx);
+% 过滤极小特征值
+mask = abs(w_B) > 1e-4 * abs(w_B(1));
+w_B = w_B(mask);
 
-aa_all = [a1k(:);a2k(:)]; aal_all = [al1k(:);al2k(:)];
+Y3 = zeros(N, length(w_B));
+for ii=1:length(w_B), Y3(:,ii) = w_B(ii).^(0:N-1)'; end
+a_B = Y3 \ y;
+at_B = log(w_B)/dt;
 
-% 策略1: 不过滤（原始）
-G1 = compute_G(aa_all, aal_all, k, rho_test);
-fprintf('策略1 (原始 %d镜像): abs=%.4f, err=%.2f%%\n', length(aa_all), abs(G1), abs(G1-G_ref)/abs(G_ref)*100);
+res_B = norm(y - Y3*a_B)/norm(y);
+fprintf('%d exp, res=%.4e\n', length(at_B), res_B);
 
-% 策略2: 过滤掉 |a_kz| > threshold 的镜像
-for thresh = [50, 100, 500, 1000]
-    mask = abs(aa_all) <= thresh;
-    G2 = compute_G(aa_all(mask), aal_all(mask), k, rho_test);
-    fprintf('策略2 (|a|<=%4d, %d镜像): abs=%.4f, err=%.2f%%\n', thresh, sum(mask), abs(G2), abs(G2-G_ref)/abs(G_ref)*100);
-end
+al_kz_B = at_B.*T02./((1+1j*T02)*k);
+a_kz_B = a_B.*exp(k*al_kz_B);
+G_B = compute_G(a_kz_B, al_kz_B, k, rho_test);
+fprintf('G = %.4e %+.4ei (abs=%.4f, err=%.2f%%)\n', real(G_B), imag(G_B), abs(G_B), abs(G_B-G_ref)/abs(G_ref)*100);
 
-% 策略3: 用更多采样点 N2=200, 但限制 L2
-fprintf('\n--- 更多采样点 ---\n');
-for N2_test = [200, 300, 500]
-    t2b = linspace(1e-2, T02, N2_test);
-    kz2b = k*(-1j*t2b+(1-t2b/T02));
-    krho2b = sqrt(k^2-kz2b.^2); krho2b = abs(real(krho2b))+1j*abs(imag(krho2b));
+%% 方法C: TLS-ESPRIT 方式 (不同的矩阵构造)
+fprintf('\n=== 方法C: 广义特征值 eig(Y2,Y1) ===\n');
+% 直接用广义特征值
+w_C = eig(Y2_mat, Y1);
+w_C = w_C(isfinite(w_C));
+[~,idx] = sort(abs(w_C),'descend');
+w_C = w_C(idx);
+
+% 用 tol_svd 对应的方式截断：只保留 |w| > threshold
+% 使用 SVD 确定有效秩
+sv = svd(Y1);
+nst = sum(sv > 1e-4*sv(1));
+w_C = w_C(1:min(nst, length(w_C)));
+
+Y3c = zeros(N, length(w_C));
+for ii=1:length(w_C), Y3c(:,ii) = w_C(ii).^(0:N-1)'; end
+a_C = Y3c \ y;
+at_C = log(w_C)/dt;
+
+res_C = norm(y - Y3c*a_C)/norm(y);
+fprintf('%d exp, res=%.4e\n', length(at_C), res_C);
+
+al_kz_C = at_C.*T02./((1+1j*T02)*k);
+a_kz_C = a_C.*exp(k*al_kz_C);
+G_C = compute_G(a_kz_C, al_kz_C, k, rho_test);
+fprintf('G = %.4e %+.4ei (abs=%.4f, err=%.2f%%)\n', real(G_C), imag(G_C), abs(G_C), abs(G_C-G_ref)/abs(G_ref)*100);
+
+%% 方法D: 遍历不同指数数量，找最优
+fprintf('\n=== 方法D: 扫描指数数量（单层DCIM简化） ===\n');
+[U,S,V] = svd(Y1);
+sv = diag(S);
+ns = min(m_rows, n_cols);
+
+for M_test = 2:min(15, ns)
+    U_M = U(:,1:M_test); V_M = V(:,1:M_test); S_M = S(1:M_test,1:M_test);
+    Z_M = S_M \ (U_M' * Y2_mat * V_M);
+    w_M = eig(Z_M);
+    [~,idx] = sort(abs(w_M),'descend');
+    w_M = w_M(idx);
     
-    K2b = zeros(1,N2_test);
-    for ii=1:N2_test
-        smgf.SetRadialWaveNumber(krho2b(ii)); smgf.ComputeSpectralMGF();
-        K2b(ii) = smgf.K(comp)*kz2b(ii);
-    end
+    Y3m = zeros(N, M_test);
+    for ii=1:M_test, Y3m(:,ii) = w_M(ii).^(0:N-1)'; end
+    a_M = Y3m \ y;
+    at_M = log(w_M)/dt;
+    res_M = norm(y - Y3m*a_M)/norm(y);
     
-    K2bm = K2b;
-    for ii=1:N2_test
-        for jj=1:length(a1k)
-            K2bm(ii) = K2bm(ii)-a1k(jj)*exp(-al1k(jj)*kz2b(ii));
-        end
-    end
-    
-    % 用不同的L值
-    for L2_test = [50, 80, 100]
-        if L2_test >= N2_test, continue; end
-        [at2b, a2b, res2b] = GPOF(K2bm(:), t2b(:), L2_test, tol_svd, 1e-16);
-        al2kb = at2b.*T02./((1+1j*T02)*k);
-        a2kb = a2b.*exp(k*al2kb);
-        
-        aab = [a1k(:);a2kb(:)]; aalb = [al1k(:);al2kb(:)];
-        Gb = compute_G(aab, aalb, k, rho_test);
-        fprintf('N2=%3d L2=%3d: %2d exp, res=%.3e, abs=%.4f, err=%.2f%%\n', ...
-            N2_test, L2_test, length(at2b), res2b, abs(Gb), abs(Gb-G_ref)/abs(G_ref)*100);
-    end
+    al_kz_M = at_M.*T02./((1+1j*T02)*k);
+    a_kz_M = a_M.*exp(k*al_kz_M);
+    G_M = compute_G(a_kz_M, al_kz_M, k, rho_test);
+    err_M = abs(G_M-G_ref)/abs(G_ref)*100;
+    fprintf('M=%2d: res=%.3e, max|a_kz|=%.2e, abs(G)=%.2f, err=%6.2f%%\n', ...
+        M_test, res_M, max(abs(a_kz_M)), abs(G_M), err_M);
 end
 
 function G = compute_G(aa, aal, k, rho)
