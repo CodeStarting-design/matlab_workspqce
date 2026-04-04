@@ -399,6 +399,20 @@ void DCIM::GenerateImages_TwoLevel(double z, double zp, std::vector<DCIM_images>
 		if (!s.components_curl[ii] && curl_mode)
 			continue;
 
+		// ===== DEBUG: 路径参数和采样值 (仅 comp 0) =====
+		if (ii == 0)
+		{
+			fprintf(stderr, "==== DCIM DEBUG (comp %d) ====\n", ii);
+			fprintf(stderr, "k = (%.15e, %.15e)\n", sp.k.real(), sp.k.imag());
+			fprintf(stderr, "T02 = %.15e, T01 = %.15e\n", sp.T02, sp.T01);
+			fprintf(stderr, "N1 = %d, N2 = %d\n", N1, N2);
+			fprintf(stderr, "dt1 = %.15e, dt2 = %.15e\n", sp.t1[2]-sp.t1[1], sp.t2[2]-sp.t2[1]);
+			fprintf(stderr, "\n--- K_path2 (before L1 subtract) first 5 ---\n");
+			for (int pp = 0; pp < 5 && pp < N2; pp++)
+				fprintf(stderr, "  K_path2[%d] = (%.15e, %.15e)\n", pp, K_path2[ii][pp].real(), K_path2[ii][pp].imag());
+			fprintf(stderr, "  K_path2[%d] = (%.15e, %.15e)\n", N2-1, K_path2[ii][N2-1].real(), K_path2[ii][N2-1].imag());
+		}
+
 		// Run GPOF on level 1 samples
 		std::vector<std::complex<double>> a, alpha;
 		RunGPOF(K_path1[ii], sp.t1[2] - sp.t1[1], a, alpha, s.tol_svd, s.tol_eig, s.max_num_images);
@@ -408,6 +422,15 @@ void DCIM::GenerateImages_TwoLevel(double z, double zp, std::vector<DCIM_images>
 		{
 			a[jj] = a[jj]*std::exp(-sp.T02*alpha[jj]);
 			alpha[jj] = alpha[jj]/(J*sp.k);
+		}
+
+		// ===== DEBUG: Level 1 转换后系数 =====
+		if (ii == 0)
+		{
+			fprintf(stderr, "\n--- Level 1 after t->kz conversion (%zu images) ---\n", a.size());
+			for (int jj = 0; jj < (int)a.size(); jj++)
+				fprintf(stderr, "  a_kz[%d]=(%.15e,%.15e)  alpha_kz[%d]=(%.15e,%.15e)\n",
+						jj, a[jj].real(), a[jj].imag(), jj, alpha[jj].real(), alpha[jj].imag());
 		}
 
 		// Store level 1 images
@@ -433,6 +456,15 @@ void DCIM::GenerateImages_TwoLevel(double z, double zp, std::vector<DCIM_images>
 		{
 			alpha[jj] = alpha[jj]*sp.T02/((1.0 + J*sp.T02)*sp.k);
 			a[jj] = a[jj]*std::exp(sp.k*alpha[jj]);
+		}
+
+		// ===== DEBUG: Level 2 转换后系数 =====
+		if (ii == 0)
+		{
+			fprintf(stderr, "\n--- Level 2 after t->kz conversion (%zu images) ---\n", a.size());
+			for (int jj = 0; jj < (int)a.size(); jj++)
+				fprintf(stderr, "  a_kz[%d]=(%.15e,%.15e)  alpha_kz[%d]=(%.15e,%.15e)\n",
+						jj, a[jj].real(), a[jj].imag(), jj, alpha[jj].real(), alpha[jj].imag());
 		}
 
 		// Store level 2 images
@@ -820,6 +852,10 @@ void DCIM::GenerateSpectralSamples(SpectralMGF &smgf, std::vector<std::vector<st
 void DCIM::RunGPOF(std::vector<std::complex<double>> &y, double dt, std::vector<std::complex<double>> &a, std::vector<std::complex<double>> &alpha, double tol_svd, double tol_eig, int max_num_images)
 {
 
+	static int gpof_call_count = 0;
+	gpof_call_count++;
+	bool debug_gpof = (gpof_call_count <= 2); // 只输出前2次调用(comp0的L1和L2)
+
 	a.clear();
 	alpha.clear();
 
@@ -852,14 +888,21 @@ void DCIM::RunGPOF(std::vector<std::complex<double>> &y, double dt, std::vector<
 		D_inv[ii + ii*ns] = 1.0/s[ii];
 
 	// Only keep singular values whose ratio to the maximum is greater than q.
-	// Could use Matlab's method to figure out how many singular values to keep:
-	// q = max(size(A))*eps(norm(A)) based on Matlab's doc for pinv.
-	// Accordingly truncate the matrix D_inv.
-	// However, this method seems to allow too much noise through, so for now, set it manually.
 	int nst;
 	for (nst = 1; nst < ns; nst++)
 		if (s[nst] < tol_svd*s[0])
 			break;
+
+	// ===== DEBUG: SVD 结果 =====
+	if (debug_gpof)
+	{
+		fprintf(stderr, "\n--- GPOF call #%d ---\n", gpof_call_count);
+		fprintf(stderr, "N=%d, L=%d, m=%d, n=%d, ns=%d\n", N, L, m, n, ns);
+		fprintf(stderr, "Singular values (first 10):\n");
+		for (int pp = 0; pp < 10 && pp < ns; pp++)
+			fprintf(stderr, "  s[%d] = %.15e\n", pp, s[pp]);
+		fprintf(stderr, "nst (SVD cutoff) = %d\n", nst);
+	}
 
 	for (int ii = nst; ii < ns; ii++)
 		D_inv[ii + ii*ns] = 0.0;
@@ -888,6 +931,15 @@ void DCIM::RunGPOF(std::vector<std::complex<double>> &y, double dt, std::vector<
 		if (std::abs(w[nwt]) < tol_eig*std::abs(w[0]))
 			break;
 
+	// ===== DEBUG: 特征值 =====
+	if (debug_gpof)
+	{
+		fprintf(stderr, "Eigenvalues of Z (first 10, unsorted):\n");
+		for (int pp = 0; pp < 10 && pp < ns; pp++)
+			fprintf(stderr, "  w[%d] = (%.15e, %.15e), |w|=%.15e\n", pp, w[pp].real(), w[pp].imag(), std::abs(w[pp]));
+		fprintf(stderr, "nwt (eig cutoff) = %d\n", nwt);
+	}
+
 	// Set up the system of equations for coefficients
 	std::vector<std::complex<double>> Y3 (N*nwt);
 	for (int ii = 0; ii < nwt; ii++) // traverse columns
@@ -905,6 +957,15 @@ void DCIM::RunGPOF(std::vector<std::complex<double>> &y, double dt, std::vector<
 		// 	break;
 		a.push_back(b[ii]);
 		alpha.push_back(std::log(w[ii])/dt);
+	}
+
+	// ===== DEBUG: 最终 GPOF 输出 =====
+	if (debug_gpof)
+	{
+		fprintf(stderr, "Final: %zu exponents\n", a.size());
+		for (int pp = 0; pp < (int)a.size(); pp++)
+			fprintf(stderr, "  a[%d]=(%.15e,%.15e)  alpha[%d]=(%.15e,%.15e)\n",
+					pp, a[pp].real(), a[pp].imag(), pp, alpha[pp].real(), alpha[pp].imag());
 	}
 
 	return;
