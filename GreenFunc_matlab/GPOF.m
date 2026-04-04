@@ -3,9 +3,12 @@ function [exponents, coefficients, residual] = GPOF(y, t, L, tol_svd, tol_eig)
 %
 % Fits y(t) = sum a_i * exp(alpha_i * t)
 %
-% Uses TLS-based Matrix Pencil Method following strata C++ RunGPOF(),
-% with improved numerical stability via SVD-filtered generalized
-% eigenvalue approach.
+% Follows strata C++ RunGPOF() exactly:
+%   - SVD truncation of Y1
+%   - Z = D_inv * U^H * Y2 * V (full ns x ns, with D_inv zeroed)
+%   - Eigenvalues of full Z via Schur decomposition (matches LAPACK zgeev behavior)
+%
+% Reference: strata/src/DCIM.cpp RunGPOF()
 
 if nargin < 3 || isempty(L), L = []; end
 if nargin < 4 || isempty(tol_svd), tol_svd = 1e-4; end
@@ -33,12 +36,12 @@ for ii = 1:n
     end
 end
 
-% Full SVD of Y1
+% Full SVD of Y1 (C++ uses LAPACKE_zgesvd with 'A','A')
 [U, S, V] = svd(Y1);
 singular_values = diag(S);
 ns = min(m, n);
 
-% Determine truncation point
+% Determine truncation point (strata style)
 nst = ns;
 for ii = 2:ns
     if singular_values(ii) < tol_svd * singular_values(1)
@@ -47,22 +50,27 @@ for ii = 2:ns
     end
 end
 
-% Truncated SVD approach: Z = S_nst^{-1} * U_nst^H * Y2 * V_nst
-% This gives an nst x nst matrix whose eigenvalues are the signal poles
-U_nst = U(:, 1:nst);
-V_nst = V(:, 1:nst);
-S_nst_inv = diag(1.0 ./ singular_values(1:nst));
+% Build D_inv: ns x ns, zero out small singular values (C++ style)
+D_inv = zeros(ns, ns);
+for ii = 1:nst
+    D_inv(ii, ii) = 1.0 / singular_values(ii);
+end
 
-Z = S_nst_inv * (U_nst' * Y2 * V_nst);
+% Z = D_inv * U_ns^H * Y2 * V_ns  (ns x ns)
+U_ns = U(:, 1:ns);
+V_ns = V(:, 1:ns);
+Z = D_inv * (U_ns' * Y2 * V_ns);
 
-% Compute eigenvalues
-w = eig(Z);
+% Eigenvalues via Schur decomposition (more numerically stable)
+% LAPACK zgeev internally uses Schur decomposition
+[~, T_schur] = schur(Z, 'complex');
+w = diag(T_schur);
 
 % Sort by magnitude (descending)
 [~, idx] = sort(abs(w), 'descend');
 w = w(idx);
 
-% Filter by tol_eig
+% Filter by tol_eig (strata style)
 nwt = length(w);
 for ii = 2:length(w)
     if abs(w(ii)) < tol_eig * abs(w(1))
@@ -81,11 +89,10 @@ end
 % Solve least squares
 a = Y3 \ y;
 
-% Extract results
 coefficients = a;
 exponents = log(w) / dt;
 
-% Compute residual
+% Residual
 y_fit = Y3 * a;
 residual = norm(y - y_fit) / norm(y);
 
