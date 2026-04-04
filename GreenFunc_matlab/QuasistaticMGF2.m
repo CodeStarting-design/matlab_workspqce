@@ -470,10 +470,39 @@ classdef QuasistaticMGF2 < handle
         
         % ... [Fresnel and M computations] ...
         function ComputeFresnelCoefficients(obj)
-            N = length(obj.lm.layers); obj.Rrs = repmat(struct('Fe',0,'Fh',0), N+1, 1); obj.Rls = repmat(struct('Fe',0,'Fh',0), N+1, 1);
-            for ii = 0:(N-1), [ec, mc] = obj.GetLayerParams(ii); [eu, mu] = obj.GetLayerParams(ii-1); idx=ii+1; obj.Rrs(idx).Fh=-(mc-mu)/(mc+mu); obj.Rrs(idx).Fe=(ec-eu)/(ec+eu); end
-            for ii = 0:(N-1), [ec, mc] = obj.GetLayerParams(ii); [el, ml] = obj.GetLayerParams(ii+1); idx=ii+1;
-                if ii==N-1 && obj.lm.isPEC_bot, obj.Rls(idx).Fh=-1; obj.Rls(idx).Fe=-1; else, obj.Rls(idx).Fh=-(mc-ml)/(mc+ml); obj.Rls(idx).Fe=(ec-el)/(ec+el); end
+            N = length(obj.lm.layers);
+            obj.Rrs = repmat(struct('Fe',0,'Fh',0), N+1, 1);
+            obj.Rls = repmat(struct('Fe',0,'Fh',0), N+1, 1);
+            % Upward Fresnel coefficients (Rrs)
+            % C++: if (isPEC_top) Rrs[0] = {Fe=-1, Fh=-1}
+            if obj.lm.isPEC_top
+                obj.Rrs(1).Fh = -1;
+                obj.Rrs(1).Fe = -1;
+            else
+                [ec, mc] = obj.GetLayerParams(0);
+                [eu, mu] = obj.GetLayerParams(-1);
+                obj.Rrs(1).Fh = -(mc - mu) / (mc + mu);
+                obj.Rrs(1).Fe = (ec - eu) / (ec + eu);
+            end
+            for ii = 1:(N-1)
+                [ec, mc] = obj.GetLayerParams(ii);
+                [eu, mu] = obj.GetLayerParams(ii-1);
+                idx = ii + 1;
+                obj.Rrs(idx).Fh = -(mc - mu) / (mc + mu);
+                obj.Rrs(idx).Fe = (ec - eu) / (ec + eu);
+            end
+            % Downward Fresnel coefficients (Rls)
+            for ii = 0:(N-1)
+                [ec, mc] = obj.GetLayerParams(ii);
+                [el, ml] = obj.GetLayerParams(ii+1);
+                idx = ii + 1;
+                if ii == N-1 && obj.lm.isPEC_bot
+                    obj.Rls(idx).Fh = -1;
+                    obj.Rls(idx).Fe = -1;
+                else
+                    obj.Rls(idx).Fh = -(mc - ml) / (mc + ml);
+                    obj.Rls(idx).Fe = (ec - el) / (ec + el);
+                end
             end
         end
         function ComputeM_Upward(obj), obj.MVe=1; obj.MVh=1; obj.MIe=1; obj.MIh=1; obj.nu=0; for k=obj.m:(obj.i-2), Rr=obj.GetFresnelCoefficient_Upward(k); obj.MVe=obj.MVe*(1+Rr.Fe); obj.MVh=obj.MVh*(1+Rr.Fh); obj.MIe=obj.MIe*(1-Rr.Fe); obj.MIh=obj.MIh*(1-Rr.Fh); obj.nu=obj.nu+obj.lm.GetHeight(k+1); end; end

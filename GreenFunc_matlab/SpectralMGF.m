@@ -300,17 +300,59 @@ classdef SpectralMGF < handle
         end
         function Zr=ComputeInterfaceImpedance_Upward(obj, krho, idx)
             if idx==-1, Zr=obj.Z_top; return; end
-            % Fix: isPEC_top
-            if idx==0 && obj.lm.isPEC_top, [~,~,k]=obj.GetLayerParams(0); kz=obj.ComputeAxialWaveNumber(k,krho); t=tan(kz*obj.lm.GetHeight(0)); Z=obj.ComputeLayerImpedance(krho,0,kz); J=1i; Zr.Ze=Z.Ze.*J.*t; Zr.Zh=Z.Zh.*J.*t; Zr.Ye=Z.Ye./(J.*t); Zr.Yh=Z.Yh./(J.*t); return; end
-            [~,~,k]=obj.GetLayerParams(idx); kz=obj.ComputeAxialWaveNumber(k,krho); t=tan(kz*obj.lm.GetHeight(idx)); Z=obj.ComputeLayerImpedance(krho,idx,kz); Zr_next=obj.ComputeInterfaceImpedance_Upward(krho,idx-1); J=1i;
-            Zr.Ze=Z.Ze.*(Zr_next.Ze+J.*Z.Ze.*t)./(Z.Ze+J.*Zr_next.Ze.*t); Zr.Zh=Z.Zh.*(Zr_next.Zh+J.*Z.Zh.*t)./(Z.Zh+J.*Zr_next.Zh.*t); Zr.Ye=1./Zr.Ze; Zr.Yh=1./Zr.Zh;
+            J=1i;
+            % isPEC_top 特殊处理
+            if idx==0 && obj.lm.isPEC_top
+                [~,~,k]=obj.GetLayerParams(0); kz=obj.ComputeAxialWaveNumber(k,krho);
+                t=tan(kz*obj.lm.GetHeight(0)); Z=obj.ComputeLayerImpedance(krho,0,kz);
+                Zr.Ze=Z.Ze.*J.*t; Zr.Zh=Z.Zh.*J.*t;
+                Zr.Ye=Z.Ye./(J.*t); Zr.Yh=Z.Yh./(J.*t);
+                return;
+            end
+            [~,~,k]=obj.GetLayerParams(idx); kz=obj.ComputeAxialWaveNumber(k,krho);
+            t=tan(kz*obj.lm.GetHeight(idx)); Z=obj.ComputeLayerImpedance(krho,idx,kz);
+            Zr_next=obj.ComputeInterfaceImpedance_Upward(krho,idx-1);
+            % tan 溢出处理：与 C++ strata 一致，使用 L'Hospital 规则
+            if isfinite(abs(t))
+                Zr.Ze=Z.Ze.*(Zr_next.Ze+J.*Z.Ze.*t)./(Z.Ze+J.*Zr_next.Ze.*t);
+                Zr.Zh=Z.Zh.*(Zr_next.Zh+J.*Z.Zh.*t)./(Z.Zh+J.*Zr_next.Zh.*t);
+                Zr.Ye=Z.Ye.*(Zr_next.Ye+J.*Z.Ye.*t)./(Z.Ye+J.*Zr_next.Ye.*t);
+                Zr.Yh=Z.Yh.*(Zr_next.Yh+J.*Z.Yh.*t)./(Z.Yh+J.*Zr_next.Yh.*t);
+            else
+                % L'Hospital's rule: tan->inf 时的极限
+                Zr.Ze=Z.Ze.^2./Zr_next.Ze;
+                Zr.Zh=Z.Zh.^2./Zr_next.Zh;
+                Zr.Ye=Z.Ye.^2./Zr_next.Ye;
+                Zr.Yh=Z.Yh.^2./Zr_next.Yh;
+            end
         end
         function Zl=ComputeInterfaceImpedance_Downward(obj, krho, idx)
             N=length(obj.lm.layers); if idx==N-1, Zl=obj.Z_bot; return; end
-            % Fix: isPEC_bot
-            if idx==N-2 && obj.lm.isPEC_bot, [~,~,k]=obj.GetLayerParams(idx+1); kz=obj.ComputeAxialWaveNumber(k,krho); t=tan(kz*obj.lm.GetHeight(idx+1)); Z=obj.ComputeLayerImpedance(krho,idx+1,kz); J=1i; Zl.Ze=Z.Ze.*J.*t; Zl.Zh=Z.Zh.*J.*t; Zl.Ye=Z.Ye./(J.*t); Zl.Yh=Z.Yh./(J.*t); return; end
-            [~,~,k]=obj.GetLayerParams(idx+1); kz=obj.ComputeAxialWaveNumber(k,krho); t=tan(kz*obj.lm.GetHeight(idx+1)); Z=obj.ComputeLayerImpedance(krho,idx+1,kz); Zl_next=obj.ComputeInterfaceImpedance_Downward(krho,idx+1); J=1i;
-            Zl.Ze=Z.Ze.*(Zl_next.Ze+J.*Z.Ze.*t)./(Z.Ze+J.*Zl_next.Ze.*t); Zl.Zh=Z.Zh.*(Zl_next.Zh+J.*Z.Zh.*t)./(Z.Zh+J.*Zl_next.Zh.*t); Zl.Ye=1./Zl.Ze; Zl.Yh=1./Zl.Zh;
+            J=1i;
+            % isPEC_bot 特殊处理
+            if idx==N-2 && obj.lm.isPEC_bot
+                [~,~,k]=obj.GetLayerParams(idx+1); kz=obj.ComputeAxialWaveNumber(k,krho);
+                t=tan(kz*obj.lm.GetHeight(idx+1)); Z=obj.ComputeLayerImpedance(krho,idx+1,kz);
+                Zl.Ze=Z.Ze.*J.*t; Zl.Zh=Z.Zh.*J.*t;
+                Zl.Ye=Z.Ye./(J.*t); Zl.Yh=Z.Yh./(J.*t);
+                return;
+            end
+            [~,~,k]=obj.GetLayerParams(idx+1); kz=obj.ComputeAxialWaveNumber(k,krho);
+            t=tan(kz*obj.lm.GetHeight(idx+1)); Z=obj.ComputeLayerImpedance(krho,idx+1,kz);
+            Zl_next=obj.ComputeInterfaceImpedance_Downward(krho,idx+1);
+            % tan 溢出处理：与 C++ strata 一致，使用 L'Hospital 规则
+            if isfinite(abs(t))
+                Zl.Ze=Z.Ze.*(Zl_next.Ze+J.*Z.Ze.*t)./(Z.Ze+J.*Zl_next.Ze.*t);
+                Zl.Zh=Z.Zh.*(Zl_next.Zh+J.*Z.Zh.*t)./(Z.Zh+J.*Zl_next.Zh.*t);
+                Zl.Ye=Z.Ye.*(Zl_next.Ye+J.*Z.Ye.*t)./(Z.Ye+J.*Zl_next.Ye.*t);
+                Zl.Yh=Z.Yh.*(Zl_next.Yh+J.*Z.Yh.*t)./(Z.Yh+J.*Zl_next.Yh.*t);
+            else
+                % L'Hospital's rule: tan->inf 时的极限
+                Zl.Ze=Z.Ze.^2./Zl_next.Ze;
+                Zl.Zh=Z.Zh.^2./Zl_next.Zh;
+                Zl.Ye=Z.Ye.^2./Zl_next.Ye;
+                Zl.Yh=Z.Yh.^2./Zl_next.Yh;
+            end
         end
         % Reflection Coeffs (Fixes applied internally via ComputeHalfspaceImpedance isPEC checks)
         function Gr=ComputeReflectionCoefficient_Upward(obj, krho, idx)
