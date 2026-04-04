@@ -69,13 +69,13 @@ classdef DCIM_Integrated < handle
             obj.images = struct('a', {}, 'alpha', {}, 'k', {});
             
             % 计算 DCIM 路径参数（共享）
-            % 使用 k_max 代替 k_min：路径2起始点 kz≈k 时能覆盖所有层的
-            % 表面波极点（极点 krho 在 k_min ~ k_max 之间），从而使 GPOF
-            % 更好地拟合极点附近的快速变化。
-            k = abs(obj.lm.k_max);
+            % 使用 2*k_min 作为路径波数：路径2起始点 kz≈k 时能更好地覆盖
+            % 所有层的表面波极点（极点 krho 在 k_min ~ k_max 之间）。
+            % T02 使用 12*sqrt(epsr_max) 以获得最佳综合精度。
+            k = 2.0 * obj.lm.k_min;
             epsr_list = [obj.lm.layers.epsr];
             epsr_max = max(epsr_list);
-            T02 = 8.0 * sqrt(epsr_max);
+            T02 = 12.0 * sqrt(epsr_max);
             T01 = 200.0;
             
             % 生成路径采样点
