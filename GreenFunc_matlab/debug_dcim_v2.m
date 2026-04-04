@@ -1,4 +1,4 @@
-%% 扫描 tol_eig 参数
+%% 分析转换后系数稳定性
 clear classes; %#ok<CLCLS>
 clear; clc;
 addpath(pwd);
@@ -35,7 +35,6 @@ t2 = linspace(1e-2, T02, N2);
 kz2 = k*(-1j*t2+(1-t2/T02));
 krho2 = sqrt(k^2-kz2.^2); krho2 = abs(real(krho2))+1j*abs(imag(krho2));
 
-% 采样
 K1 = zeros(1,N1);
 for ii=1:N1
     smgf.SetRadialWaveNumber(krho1(ii)); smgf.ComputeSpectralMGF();
@@ -61,26 +60,17 @@ qmgf.SetLayers(i_src, m_obs);
 K_q = qmgf.ComputeQMGF_Spatial(z_obs, z_src, rho_test);
 G_ref = G_int + K_q(comp);
 
-fprintf('G_ref = %.4e %+.4ei (abs=%.4f)\n\n', real(G_ref), imag(G_ref), abs(G_ref));
-
-% 扫描 tol_svd 和 tol_eig
-configs = {
-    1e-4, 1e-16;  % 原始（strata默认）
-    1e-4, 1e-6;   % 放宽eig
-    1e-4, 1e-3;
-    1e-4, 1e-2;
-    1e-6, 1e-16;  % 更严格svd
-    1e-6, 1e-6;
-    1e-6, 1e-3;
-    1e-8, 1e-16;
-    1e-8, 1e-6;
-};
-
-for cc = 1:size(configs,1)
-    tol_svd = configs{cc,1}; tol_eig = configs{cc,2};
+for tol_svd = [1e-4, 1e-6]
+    fprintf('\n======== tol_svd = %.0e ========\n', tol_svd);
     
-    [at1, a1, ~] = GPOF(K1(:), t1(:), 50, tol_svd, tol_eig);
+    [at1, a1, ~] = GPOF(K1(:), t1(:), 50, tol_svd, 1e-16);
     a1k = a1.*exp(-T02*at1); al1k = at1./(1j*k);
+    
+    fprintf('L1: %d exp\n', length(at1));
+    for jj=1:length(a1k)
+        fprintf('  a_t=%.3e, alpha_t=%.3e%+.3ei -> a_kz=%.3e, alpha_kz=%.3e%+.3ei\n', ...
+            abs(a1(jj)), real(at1(jj)), imag(at1(jj)), abs(a1k(jj)), real(al1k(jj)), imag(al1k(jj)));
+    end
     
     K2m = K2;
     for ii=1:N2
@@ -89,20 +79,28 @@ for cc = 1:size(configs,1)
         end
     end
     
-    [at2, a2, res2] = GPOF(K2m(:), t2(:), 50, tol_svd, tol_eig);
+    [at2, a2, res2] = GPOF(K2m(:), t2(:), 50, tol_svd, 1e-16);
     al2k = at2.*T02./((1+1j*T02)*k);
     a2k = a2.*exp(k*al2k);
     
-    aa = [a1k(:);a2k(:)]; aal = [al1k(:);al2k(:)];
+    fprintf('L2: %d exp, res=%.4e\n', length(at2), res2);
+    for jj=1:length(a2k)
+        fprintf('  a_t=%.3e, alpha_t=%.3e%+.3ei -> a_kz=%.3e, alpha_kz=%.3e%+.3ei\n', ...
+            abs(a2(jj)), real(at2(jj)), imag(at2(jj)), abs(a2k(jj)), real(al2k(jj)), imag(al2k(jj)));
+    end
     
-    G_dcim = 0;
+    % Sommerfeld identity贡献分析
+    aa = [a1k(:);a2k(:)]; aal = [al1k(:);al2k(:)];
+    fprintf('\nSommerfeld identity (rho=%.2e):\n', rho_test);
+    G_total = 0;
     for ii=1:length(aa)
         Rc = sqrt(rho_test^2-aal(ii)^2);
-        G_dcim = G_dcim + aa(ii)*exp(-1j*k*Rc)/Rc;
+        contrib = aa(ii)*exp(-1j*k*Rc)/Rc * 1j/(2*pi);
+        G_total = G_total + contrib;
+        fprintf('  img%2d: |a|=%.3e, alpha=%.3e%+.3ei, |Rc|=%.3e, |contrib|=%.3e\n', ...
+            ii, abs(aa(ii)), real(aal(ii)), imag(aal(ii)), abs(Rc), abs(contrib));
     end
-    G_dcim = G_dcim*1j/(2*pi);
-    
-    err = abs(G_dcim-G_ref)/abs(G_ref)*100;
-    fprintf('svd=%.0e eig=%.0e | L1:%2d L2:%2d res2=%.3e | 镜像:%2d | err=%6.2f%%\n', ...
-        tol_svd, tol_eig, length(at1), length(at2), res2, length(aa), err);
+    fprintf('G_dcim = %.4e %+.4ei (abs=%.4f)\n', real(G_total), imag(G_total), abs(G_total));
+    fprintf('G_ref  = %.4e %+.4ei (abs=%.4f)\n', real(G_ref), imag(G_ref), abs(G_ref));
+    fprintf('误差 = %.2f%%\n', abs(G_total-G_ref)/abs(G_ref)*100);
 end
